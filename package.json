@@ -4,8 +4,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "google-indexing-script": "./dist/bin.js",
-    "gis": "./dist/bin.js"
+    "google-indexing-script": "dist/bin.js",
+    "gis": "dist/bin.js"
   },
   "keywords": [
     "google",
