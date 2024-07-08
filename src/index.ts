@@ -9,8 +9,8 @@ import {
   checkSiteUrl,
   checkCustomUrls,
 } from "./shared/gsc";
-import { getSitemapPages } from "./shared/sitemap";
-import { Status } from "./shared/types";
+import { getSitemapUrls } from "./shared/sitemap";
+import { IndexingStatus, Page, PageStatus } from "./shared/types";
 import { batch, parseCommandLineArgs } from "./shared/utils";
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
@@ -77,10 +77,10 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
 
   siteUrl = await checkSiteUrl(accessToken, siteUrl);
 
-  let pages = options.urls || [];
-  if (pages.length === 0) {
+  let urls = options.urls || [];
+  if (urls.length === 0) {
     console.log(`🔎 Fetching sitemaps and pages...`);
-    const [sitemaps, pagesFromSitemaps] = await getSitemapPages(accessToken, siteUrl);
+    const [sitemaps, urlsFromSitemaps] = await getSitemapUrls(accessToken, siteUrl);
 
     if (sitemaps.length === 0) {
       console.error("❌ No sitemaps found, add them to Google Search Console and try again.");
@@ -88,56 +88,63 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
       process.exit(1);
     }
 
-    pages = pagesFromSitemaps;
+    urls = urlsFromSitemaps;
 
-    console.log(`👉 Found ${pages.length} URLs in ${sitemaps.length} sitemap`);
+    console.log(`👉 Found ${urls.length} URLs in ${sitemaps.length} sitemap`);
   } else {
-    pages = checkCustomUrls(siteUrl, pages);
-    console.log(`👉 Found ${pages.length} URLs in the provided list`);
+    urls = checkCustomUrls(siteUrl, urls);
+    console.log(`👉 Found ${urls.length} URLs in the provided list`);
   }
 
-  const statusPerUrl: Record<string, { status: Status; lastCheckedAt: string }> = existsSync(cachePath)
-    ? JSON.parse(readFileSync(cachePath, "utf8"))
-    : {};
-  const pagesPerStatus: Record<Status, string[]> = {
-    [Status.SubmittedAndIndexed]: [],
-    [Status.DuplicateWithoutUserSelectedCanonical]: [],
-    [Status.CrawledCurrentlyNotIndexed]: [],
-    [Status.DiscoveredCurrentlyNotIndexed]: [],
-    [Status.PageWithRedirect]: [],
-    [Status.URLIsUnknownToGoogle]: [],
-    [Status.RateLimited]: [],
-    [Status.Forbidden]: [],
-    [Status.Error]: [],
+  const pages: Record<string, Page> = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : {};
+  const pagesPerIndexingStatus: Record<IndexingStatus, string[]> = {
+    [IndexingStatus.SubmittedAndIndexed]: [],
+    [IndexingStatus.DuplicateWithoutUserSelectedCanonical]: [],
+    [IndexingStatus.CrawledCurrentlyNotIndexed]: [],
+    [IndexingStatus.DiscoveredCurrentlyNotIndexed]: [],
+    [IndexingStatus.PageWithRedirect]: [],
+    [IndexingStatus.URLIsUnknownToGoogle]: [],
+    [IndexingStatus.RateLimited]: [],
+    [IndexingStatus.Forbidden]: [],
+    [IndexingStatus.Error]: [],
   };
 
   const indexableStatuses = [
-    Status.DiscoveredCurrentlyNotIndexed,
-    Status.CrawledCurrentlyNotIndexed,
-    Status.URLIsUnknownToGoogle,
-    Status.Forbidden,
-    Status.Error,
-    Status.RateLimited,
+    IndexingStatus.DiscoveredCurrentlyNotIndexed,
+    IndexingStatus.CrawledCurrentlyNotIndexed,
+    IndexingStatus.URLIsUnknownToGoogle,
+    IndexingStatus.Forbidden,
+    IndexingStatus.Error,
   ];
 
-  const shouldRecheck = (status: Status, lastCheckedAt: string) => {
-    const shouldIndexIt = indexableStatuses.includes(status);
-    const isOld = new Date(lastCheckedAt) < new Date(Date.now() - CACHE_TIMEOUT);
-    return shouldIndexIt && isOld;
+  const shouldRecheck = (page: Page) => {
+    const isFailed = page.status === PageStatus.Failed;
+    const isOld = new Date(page.lastCheckedAt) < new Date(Date.now() - CACHE_TIMEOUT);
+    return isOld || isFailed;
   };
 
   await batch(
     async (url) => {
-      let result = statusPerUrl[url];
-      if (!result || shouldRecheck(result.status, result.lastCheckedAt)) {
-        const status = await getPageIndexingStatus(accessToken, siteUrl, url);
-        result = { status, lastCheckedAt: new Date().toISOString() };
-        statusPerUrl[url] = result;
+      let page = pages[url];
+      if (!page || shouldRecheck(page)) {
+        const indexingStatus = await getPageIndexingStatus(accessToken, siteUrl, url);
+        page = {
+          indexingStatus,
+          status: indexableStatuses.includes(indexingStatus)
+            ? PageStatus.Pending
+            : indexingStatus === IndexingStatus.RateLimited
+            ? PageStatus.Failed
+            : PageStatus.Completed,
+          lastCheckedAt: new Date().toISOString(),
+        };
+        pages[url] = page;
       }
 
-      pagesPerStatus[result.status] = pagesPerStatus[result.status] ? [...pagesPerStatus[result.status], url] : [url];
+      pagesPerIndexingStatus[page.indexingStatus] = pagesPerIndexingStatus[page.indexingStatus]
+        ? [...pagesPerIndexingStatus[page.indexingStatus], url]
+        : [url];
     },
-    pages,
+    urls,
     50,
     (batchIndex, batchCount) => {
       console.log(`📦 Batch ${batchIndex + 1} of ${batchCount} complete`);
@@ -145,30 +152,32 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
   );
 
   console.log(``);
-  console.log(`👍 Done, here's the status of all ${pages.length} pages:`);
+  console.log(`👍 Done, here's the indexing status of all ${Object.keys(pages).length} pages:`);
   mkdirSync(".cache", { recursive: true });
-  writeFileSync(cachePath, JSON.stringify(statusPerUrl, null, 2));
+  writeFileSync(cachePath, JSON.stringify(pages, null, 2));
 
-  for (const status of Object.keys(pagesPerStatus)) {
-    const pages = pagesPerStatus[status as Status];
+  for (const indexingStatus of Object.keys(pagesPerIndexingStatus)) {
+    const pages = pagesPerIndexingStatus[indexingStatus as IndexingStatus];
     if (pages.length === 0) continue;
-    console.log(`• ${getEmojiForStatus(status as Status)} ${status}: ${pages.length} pages`);
+    console.log(`   • ${getEmojiForStatus(indexingStatus as IndexingStatus)} ${indexingStatus}: ${pages.length} pages`);
   }
   console.log("");
 
-  const indexablePages = Object.entries(pagesPerStatus).flatMap(([status, pages]) =>
-    indexableStatuses.includes(status as Status) ? pages : []
-  );
+  const shouldBeSubmitted = (page: Page) => {
+    return page.status === PageStatus.Pending;
+  };
 
-  if (indexablePages.length === 0) {
-    console.log(`✨ There are no pages that can be indexed. Everything is already indexed!`);
+  const queue = Object.keys(pages).filter((url) => shouldBeSubmitted(pages[url]));
+
+  if (queue.length === 0) {
+    console.log(`✨ There are no pages that can be indexed for now.`);
   } else {
-    console.log(`✨ Found ${indexablePages.length} pages that can be indexed.`);
-    indexablePages.forEach((url) => console.log(`• ${url}`));
+    console.log(`✨ Found ${queue.length} pages that can be indexed.`);
+    queue.forEach((url) => console.log(`   • ${url}`));
   }
   console.log(``);
 
-  for (const url of indexablePages) {
+  for (const url of queue) {
     console.log(`📄 Processing url: ${url}`);
     const status = await getPublishMetadata(accessToken, url, {
       retriesOnRateLimit: options.quota.rpmRetry ? QUOTA.rpm.retries : 0,

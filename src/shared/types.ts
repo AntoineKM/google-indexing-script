@@ -1,7 +1,7 @@
 /**
  * Enum representing indexing status of a URL
  */
-export enum Status {
+export enum IndexingStatus {
   SubmittedAndIndexed = "Submitted and indexed",
   DuplicateWithoutUserSelectedCanonical = "Duplicate without user-selected canonical",
   CrawledCurrentlyNotIndexed = "Crawled - currently not indexed",
@@ -12,3 +12,19 @@ export enum Status {
   Forbidden = "Forbidden",
   Error = "Error",
 }
+
+/**
+ * Enum representing status of a task
+ */
+export enum PageStatus {
+  Pending = "Pending",
+  Processing = "Processing",
+  Completed = "Completed",
+  Failed = "Failed",
+}
+
+export type Page = {
+  status: PageStatus;
+  indexingStatus: IndexingStatus;
+  lastCheckedAt: string;
+};

@@ -1,6 +1,6 @@
 import { webmasters_v3 } from "googleapis";
 import { QUOTA } from "..";
-import { Status } from "./types";
+import { IndexingStatus } from "./types";
 import { fetchRetry } from "./utils";
 
 /**
@@ -161,7 +161,7 @@ export async function getPageIndexingStatus(
   accessToken: string,
   siteUrl: string,
   inspectionUrl: string
-): Promise<Status> {
+): Promise<IndexingStatus> {
   try {
     const response = await fetchRetry(`https://searchconsole.googleapis.com/v1/urlInspection/index:inspect`, {
       method: "POST",
@@ -179,18 +179,18 @@ export async function getPageIndexingStatus(
       console.error(`🔐 This service account doesn't have access to this site.`);
       console.error(await response.text());
 
-      return Status.Forbidden;
+      return IndexingStatus.Forbidden;
     }
 
     if (response.status >= 300) {
       if (response.status === 429) {
-        return Status.RateLimited;
+        return IndexingStatus.RateLimited;
       } else {
         console.error(`❌ Failed to get indexing status.`);
         console.error(`Response was: ${response.status}`);
         console.error(await response.text());
 
-        return Status.Error;
+        return IndexingStatus.Error;
       }
     }
 
@@ -208,20 +208,20 @@ export async function getPageIndexingStatus(
  * @param status - The status for which to retrieve the emoji.
  * @returns The emoji representing the status.
  */
-export function getEmojiForStatus(status: Status) {
+export function getEmojiForStatus(status: IndexingStatus) {
   switch (status) {
-    case Status.SubmittedAndIndexed:
+    case IndexingStatus.SubmittedAndIndexed:
       return "✅";
-    case Status.DuplicateWithoutUserSelectedCanonical:
+    case IndexingStatus.DuplicateWithoutUserSelectedCanonical:
       return "😵";
-    case Status.CrawledCurrentlyNotIndexed:
-    case Status.DiscoveredCurrentlyNotIndexed:
+    case IndexingStatus.CrawledCurrentlyNotIndexed:
+    case IndexingStatus.DiscoveredCurrentlyNotIndexed:
       return "👀";
-    case Status.PageWithRedirect:
+    case IndexingStatus.PageWithRedirect:
       return "🔀";
-    case Status.URLIsUnknownToGoogle:
+    case IndexingStatus.URLIsUnknownToGoogle:
       return "❓";
-    case Status.RateLimited:
+    case IndexingStatus.RateLimited:
       return "🚦";
     default:
       return "❌";
@@ -263,13 +263,6 @@ export async function getPublishMetadata(accessToken: string, url: string, optio
       );
       await new Promise((resolve) => setTimeout(resolve, RPM_WATING_TIME));
       await getPublishMetadata(accessToken, url, { retriesOnRateLimit: options.retriesOnRateLimit - 1 });
-    } else {
-      console.error("🚦 Rate limit exceeded, try again later.");
-      console.error("");
-      console.error("   Quota: https://developers.google.com/search/apis/indexing-api/v3/quota-pricing#quota");
-      console.error("   Usage: https://console.cloud.google.com/apis/enabled");
-      console.error("");
-      process.exit(1);
     }
   }
 

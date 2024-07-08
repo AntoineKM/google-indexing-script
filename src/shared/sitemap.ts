@@ -41,23 +41,23 @@ async function getSitemapsList(accessToken: string, siteUrl: string) {
 }
 
 /**
- * Retrieves a list of pages from all sitemaps associated with the specified site URL.
+ * Retrieves a list of urls from all sitemaps associated with the specified site URL.
  * @param accessToken The access token for authentication.
- * @param siteUrl The URL of the site for which to retrieve the sitemap pages.
+ * @param siteUrl The URL of the site for which to retrieve the sitemap urls.
  * @returns An array containing the list of sitemaps and an array of unique page URLs extracted from those sitemaps.
  */
-export async function getSitemapPages(accessToken: string, siteUrl: string) {
+export async function getSitemapUrls(accessToken: string, siteUrl: string) {
   const sitemaps = await getSitemapsList(accessToken, siteUrl);
 
-  let pages: string[] = [];
+  let urls: string[] = [];
   for (const url of sitemaps) {
     const Google = new Sitemapper({
       url,
     });
 
     const { sites } = await Google.fetch();
-    pages = [...pages, ...sites];
+    urls = [...urls, ...sites];
   }
 
-  return [sitemaps, [...new Set(pages)]];
+  return [sitemaps, [...new Set(urls)]];
 }
