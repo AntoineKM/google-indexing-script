@@ -27,6 +27,7 @@
     "release": "changeset publish"
   },
   "dependencies": {
+    "@clack/prompts": "^0.7.0",
     "googleapis": "131.0.0",
     "sitemapper": "3.2.8"
   },
