@@ -1,3 +1,4 @@
+import { cancel, intro, isCancel, log, spinner } from "@clack/prompts";
 import { getAccessToken } from "./shared/auth";
 import {
   convertToSiteUrl,
@@ -14,6 +15,7 @@ import { Status } from "./shared/types";
 import { batch, parseCommandLineArgs } from "./shared/utils";
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
+import { cyan, green, blue, yellow } from "picocolors";
 
 const CACHE_TIMEOUT = 1000 * 60 * 60 * 24 * 14; // 14 days
 export const QUOTA = {
@@ -39,9 +41,11 @@ export type IndexOptions = {
  * @param options - (Optional) Additional options for indexing.
  */
 export const index = async (input: string = process.argv[2], options: IndexOptions = {}) => {
+  intro(`Welcome to ${cyan("Google Indexing API")}! 🚀`);
+
   if (!input) {
-    console.error("❌ Please provide a domain or site URL as the first argument.");
-    console.error("");
+    log.message("")
+    cancel("Please provide a domain or site URL as the first argument.");
     process.exit(1);
   }
 
@@ -64,36 +68,45 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
     };
   }
 
-  const accessToken = await getAccessToken(options.client_email, options.private_key, options.path);
-  let siteUrl = convertToSiteUrl(input);
-  console.log(`🔎 Processing site: ${siteUrl}`);
-  const cachePath = path.join(".cache", `${convertToFilePath(siteUrl)}.json`);
-
-  if (!accessToken) {
-    console.error("❌ Failed to get access token, check your service account credentials.");
-    console.error("");
+  const s = spinner();
+  if (isCancel(s)) {
+    cancel("Operation cancelled.");
     process.exit(1);
   }
 
+  const accessToken = await getAccessToken(options.client_email, options.private_key, options.path);
+  let siteUrl = convertToSiteUrl(input);
+  s.start(`Processing site: ${siteUrl} - Getting access token`);
+  const cachePath = path.join(".cache", `${convertToFilePath(siteUrl)}.json`);
+
+  if (!accessToken) {
+    log.message("")
+    cancel("Failed to get access token, check your service account credentials.");
+    process.exit(1);
+  }
+
+  s.message(`Processing site: ${siteUrl} - Checking access to the site on Google Search Console`);
   siteUrl = await checkSiteUrl(accessToken, siteUrl);
+
+  s.stop(`Processing site: ${siteUrl} - ${green("Access granted!")}`);
 
   let pages = options.urls || [];
   if (pages.length === 0) {
-    console.log(`🔎 Fetching sitemaps and pages...`);
+    s.start(`Fetching sitemaps and pages`);
     const [sitemaps, pagesFromSitemaps] = await getSitemapPages(accessToken, siteUrl);
 
     if (sitemaps.length === 0) {
-      console.error("❌ No sitemaps found, add them to Google Search Console and try again.");
-      console.error("");
+      log.message("")
+      cancel("No sitemaps found, add them to Google Search Console and try again.");
       process.exit(1);
     }
 
     pages = pagesFromSitemaps;
 
-    console.log(`👉 Found ${pages.length} URLs in ${sitemaps.length} sitemap`);
+    s.stop(`Found ${pages.length} URLs in ${sitemaps.length} sitemap`);
   } else {
     pages = checkCustomUrls(siteUrl, pages);
-    console.log(`👉 Found ${pages.length} URLs in the provided list`);
+    s.stop(`Found ${pages.length} URLs in the provided list`);
   }
 
   const statusPerUrl: Record<string, { status: Status; lastCheckedAt: string }> = existsSync(cachePath)
@@ -126,8 +139,11 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
     return shouldIndexIt && isOld;
   };
 
+  s.start(`Checking indexing status of ${pages.length} pages`);
+
+  const batchSize = 50;
   await batch(
-    async (url) => {
+    async (url, itemIndex, batchIndex, batchCount) => {
       let result = statusPerUrl[url];
       if (!result || shouldRecheck(result.status, result.lastCheckedAt)) {
         const status = await getPageIndexingStatus(accessToken, siteUrl, url);
@@ -136,55 +152,56 @@ export const index = async (input: string = process.argv[2], options: IndexOptio
       }
 
       pagesPerStatus[result.status] = pagesPerStatus[result.status] ? [...pagesPerStatus[result.status], url] : [url];
+
+      s.message(`Batch ${batchIndex + 1} of ${batchCount} - ${blue(`${itemIndex + 1}/${batchSize}`)}`);
     },
     pages,
-    50,
+    batchSize,
     (batchIndex, batchCount) => {
-      console.log(`📦 Batch ${batchIndex + 1} of ${batchCount} complete`);
+      s.message(`Batch ${batchIndex + 1} of ${batchCount} - ${green("Completed")}`);
     }
   );
 
-  console.log(``);
-  console.log(`👍 Done, here's the status of all ${pages.length} pages:`);
+  s.stop(`Done, here's the status of all ${pages.length} pages:`)
+
   mkdirSync(".cache", { recursive: true });
   writeFileSync(cachePath, JSON.stringify(statusPerUrl, null, 2));
 
   for (const status of Object.keys(pagesPerStatus)) {
     const pages = pagesPerStatus[status as Status];
     if (pages.length === 0) continue;
-    console.log(`• ${getEmojiForStatus(status as Status)} ${status}: ${pages.length} pages`);
+    log.message(`   • ${getEmojiForStatus(status as Status)} ${status}: ${pages.length} pages`);
   }
-  console.log("");
+  log.message("");
 
   const indexablePages = Object.entries(pagesPerStatus).flatMap(([status, pages]) =>
     indexableStatuses.includes(status as Status) ? pages : []
   );
 
   if (indexablePages.length === 0) {
-    console.log(`✨ There are no pages that can be indexed. Everything is already indexed!`);
+    log.warn(`There are no pages that can be indexed. Everything is already indexed!`);
   } else {
-    console.log(`✨ Found ${indexablePages.length} pages that can be indexed.`);
-    indexablePages.forEach((url) => console.log(`• ${url}`));
+    log.success(`✨ Found ${indexablePages.length} pages that can be indexed.`);
   }
-  console.log(``);
+  log.message(``);
 
   for (const url of indexablePages) {
-    console.log(`📄 Processing url: ${url}`);
+    s.start(`${url} - ${yellow("Requesting indexing...")}`);
     const status = await getPublishMetadata(accessToken, url, {
       retriesOnRateLimit: options.quota.rpmRetry ? QUOTA.rpm.retries : 0,
     });
     if (status === 404) {
       await requestIndexing(accessToken, url);
-      console.log("🚀 Indexing requested successfully. It may take a few days for Google to process it.");
+      s.stop(`${url} - ${green("Indexed successfully!")}`);
     } else if (status < 400) {
-      console.log(`🕛 Indexing already requested previously. It may take a few days for Google to process it.`);
+      s.stop(`${url} - ${blue("Already indexed!")}`);
     }
-    console.log(``);
+    log.message("");
   }
 
-  console.log(`👍 All done!`);
-  console.log(`💖 Brought to you by https://seogets.com - SEO Analytics.`);
-  console.log(``);
+  log.message(`All done! 👍`);
+  log.message(`Brought to you by https://seogets.com - SEO Analytics. 💖`);
+  log.message(``);
 };
 
 export * from "./shared";

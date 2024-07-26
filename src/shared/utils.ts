@@ -15,14 +15,18 @@ const createChunks = (arr: any[], size: number) =>
  * @param onBatchComplete The callback function invoked upon completion of each batch.
  */
 export async function batch(
-  task: (url: string) => void,
+  task: (url: string, itemIndex: number, batchIndex: number, batchCount: number) => void,
   items: string[],
   batchSize: number,
   onBatchComplete: (batchIndex: number, batchCount: number) => void
 ) {
   const chunks = createChunks(items, batchSize);
   for (let i = 0; i < chunks.length; i++) {
-    await Promise.all(chunks[i].map(task));
+    await Promise.all(
+      chunks[i].map((item, itemIndex) => // Use itemIndex directly from map
+        task(item, itemIndex, i, chunks.length) // Pass itemIndex directly
+      )
+    );
     onBatchComplete(i, chunks.length);
   }
 }

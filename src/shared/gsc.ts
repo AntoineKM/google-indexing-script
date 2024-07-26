@@ -2,6 +2,7 @@ import { webmasters_v3 } from "googleapis";
 import { QUOTA } from "..";
 import { Status } from "./types";
 import { fetchRetry } from "./utils";
+import { log } from "@clack/prompts";
 
 /**
  * Converts a given input string to a valid Google Search Console site URL format.
@@ -256,19 +257,19 @@ export async function getPublishMetadata(accessToken: string, url: string, optio
   if (response.status === 429) {
     if (options?.retriesOnRateLimit && options?.retriesOnRateLimit > 0) {
       const RPM_WATING_TIME = (QUOTA.rpm.retries - options.retriesOnRateLimit + 1) * QUOTA.rpm.waitingTime; // increase waiting time for each retry
-      console.log(
-        `🚦 Rate limit exceeded for read requests. Retries left: ${options.retriesOnRateLimit}. Waiting for ${
+      log.message(
+        `Rate limit exceeded for read requests. Retries left: ${options.retriesOnRateLimit}. Waiting for ${
           RPM_WATING_TIME / 1000
         }sec.`
       );
       await new Promise((resolve) => setTimeout(resolve, RPM_WATING_TIME));
       await getPublishMetadata(accessToken, url, { retriesOnRateLimit: options.retriesOnRateLimit - 1 });
     } else {
-      console.error("🚦 Rate limit exceeded, try again later.");
-      console.error("");
-      console.error("   Quota: https://developers.google.com/search/apis/indexing-api/v3/quota-pricing#quota");
-      console.error("   Usage: https://console.cloud.google.com/apis/enabled");
-      console.error("");
+      log.message("");
+      log.error("Rate limit exceeded, try again later.");
+      log.message("   Quota: https://developers.google.com/search/apis/indexing-api/v3/quota-pricing#quota");
+      log.message("   Usage: https://console.cloud.google.com/apis/enabled");
+      log.message("");
       process.exit(1);
     }
   }
@@ -307,11 +308,11 @@ export async function requestIndexing(accessToken: string, url: string) {
 
   if (response.status >= 300) {
     if (response.status === 429) {
-      console.error("🚦 Rate limit exceeded, try again later.");
-      console.error("");
-      console.error("   Quota: https://developers.google.com/search/apis/indexing-api/v3/quota-pricing#quota");
-      console.error("   Usage: https://console.cloud.google.com/apis/enabled");
-      console.error("");
+      log.message("");
+      log.error("Rate limit exceeded, try again later.");
+      log.message("   Quota: https://developers.google.com/search/apis/indexing-api/v3/quota-pricing#quota");
+      log.message("   Usage: https://console.cloud.google.com/apis/enabled");
+      log.message("");
       process.exit(1);
     } else {
       console.error(`❌ Failed to request indexing.`);
